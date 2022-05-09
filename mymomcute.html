@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+
+<html>
+    <head>
+        <meta charset="utf-8">
+        <title>GLSL Shadows</title>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/2.1.4/jquery.min.js"></script>
+        <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #255255255;
+        }
+        </style>
+    </head>
+    <body>
+        <canvas id="display" width="400" height="400"></canvas>
+    </body>
+    
+    <!--The library-->
+    <script id="GLSL-RRay3D-library" type="frag-shader">
+        
+        // Set float precision
+        #ifdef GL_ES
+        precision mediump float;
+        #endif
+        
+        // GLSL Equivalent to frameCount
+        uniform float time;
+        
+        // Output color
+        vec3 c = vec3(1.0, 1.0, 1.0);
+
+        // Distance estimators
+        float deSphere(vec3 from, vec3 center, float radius) {
+    		return length(center - from) - radius;
+        } // Sphere
+        float deTorus(vec3 from, vec3 center, float radius, float thickness) {
+		    return length(vec2(length(center.xz - from.xz) - radius, center.y - from.y)) - thickness;
+		} // Torus
+		float deCuboid(vec3 from, vec3 center, vec3 dimensions) {
+			return length(clamp(abs(center - from) - dimensions / 2.0, 0.0, 100000.0));
+        } // Cuboid
+        float deUncappedCylinder(vec3 from, vec3 center, float radius) {
+            return length(center.yz - from.yz) - radius;
+        } // Uncapped cylinder
+        float deCappedCylinder(vec3 from, vec3 center, float radius, float capAt) {
+            return length(vec3(from.x, center.yz) - vec3(clamp(from.x, center.x - capAt / 2.0, center.x + capAt / 2.0), from.yz)) - radius;
+        } // Capped cylinder
+        float deCapsule(vec3 from, vec3 center, float radius, float capAt) {
+            return length(vec3(from.x, center.yz) - vec3(clamp(from.x, center.x - capAt / 2.0, center.x + capAt / 2.0), from.yz)) - radius;
+        } // Capsule
+
+		// Find normal of a sphere
+        vec3 normalSphere(vec3 v, vec3 center) {
+            return normalize(center - v);
+        }
+
+        // Rounded objects (WARNING: also increases object size!)
+        float deRound(float pd, float radius) {
+        	float de = pd;
+        	return de - radius;
+        }
+
+        // Booleans (union, subtraction, intersection)
+        float boolUnion(float pd, float pd2) {
+        	return min(pd, pd2);
+        }
+        float boolSubtraction(float pd, float pd2) {
+        	return max(-pd, pd2);
+        }
+        float boolIntersection(float pd, float pd2) {
+        	return max(pd, pd2);
+        }
+
+        // Smooth Booleans
+        float smoothBoolUnion(float pd, float pd2, float smoothness) {
+        	float level = clamp(0.5 + (pd - pd2) / smoothness / 2.0, 0.0, 1.0);
+    		return mix(pd, pd2, level) - smoothness * level * (1.0 - level);
+        }
+        float smoothBoolSubtraction(float pd, float pd2, float smoothness) {
+		    float level = clamp(0.5 - (pd + pd2) / smoothness / 2.0, 0.0, 1.0 );
+		    return mix(pd2, -pd, level) + smoothness * level * (1.0 - level);
+		}
+		float smoothBoolIntersection(float pd, float pd2, float smoothness) {
+		    float level = clamp(0.5 - (pd - pd2) / smoothness / 2.0, 0.0, 1.0);
+		    return mix(pd, pd2, level) + smoothness * level * (1.0 - level);
+		}
+
+		float displace(float pd, vec3 from, vec3 dir, float size, float strength) {
+		    vec3 p = from + dir * pd;
+		    float d2 = sin(size * p.x) * sin(size * p.y) * sin(size * p.z) * strength;
+		    return pd + d2;
+		}
+		
+		vec3 rotate(vec3 inp, float xRot, float yRot, float zRot, vec3 anchor) {
+		    inp -= anchor;
+            mat2 rot = mat2(
+                cos(xRot), -sin(xRot),
+                sin(xRot), cos(xRot)
+            );
+            inp.yz *= rot; // X rotation
+            rot = mat2(
+                cos(yRot), -sin(yRot),
+                sin(yRot), cos(yRot)
+            );
+            inp.xz *= rot; // Y rotation
+            rot = mat2(
+                cos(zRot), -sin(zRot),
+                sin(zRot), cos(zRot)
+            );
+            inp.xy *= rot; // Z rotation
+            inp += anchor;
+		    return inp;
+		}
+    </script>
+    
+    <!--Setting up the scene-->
+    <script id = "scene" type = "frag-shader">
+        
+        // Lights
+        vec3 sun = vec3(-2.0, 1.0, -1.0);
+        
+        // Camera
+        vec3 cam = vec3(0.0, 0.0, -100.0);
+        float FOV = 0.25;
+        
+        // Glow settings
+        vec3 glow_color = vec3(1.0, 1.0, 1.0);
+        float glow_strength = 0.0;
+        
+        uniform vec2 cursor;
+        
+        float PI = 3.14159265358979323;
+
+        // Scene (creating the scene)
+        float scene(vec3 from) {
+            float speed = 1.0;
+            float rotation = time;
+            mat2 rot = mat2(
+                cos(rotation * speed), -sin(rotation * speed),
+                sin(rotation * speed), cos(rotation * speed)
+            );
+            from.xz *= rot; // Y rotation
+            
+            float de = deRound(deCuboid(rotate(from, 0.5, -1.0, 0.25, vec3(0.0)), vec3(0.0, 0.0, -10.0), vec3(130.0, 130.0, 20.0)), 10.0);
+            de = smoothBoolSubtraction(deSphere(rotate(from, 0.5, -1.0, 0.25, vec3(0.0)), vec3(cos(time * 2.0) * 45.0, 0.0, -10.0), 50.0), de, 5.0);
+            de = smoothBoolUnion(de, from.y + 25.0 - floor(cos(from.x / 12.0) + sin(from.z / 12.0) + 0.5) * 2.0, 20.0);
+            de = boolUnion(de, deCuboid(from, vec3(0.0, -5.0, 30.0), vec3(45.0)));
+            return de;
+            
+        }
+        
+    </script>
+    
+    <!--March-->
+    <script id = "GLSL-RRay3D-March" type="fragment-shader">
+
+        // March the rays!
+        vec3 render(vec3 from, vec3 dir) {
+        	vec3 at = from;
+        	float closest = 10000.0;
+        	for(float totalDE = 0.0; totalDE < 100.0; totalDE += 1.0) {
+        		float de = scene(at);
+        		at += dir * de;
+        		if(de < closest) {
+        			closest = de;
+        		}
+        		if(de < 0.00001) {
+        		    float closestShadow = 10000.0;
+        		    float shade = 1.0;
+        		    float bias = 1.0;
+        		    vec3 atShadow = at + bias * sun;
+        		    float totalShadowDE = bias;
+        		    for(float shadowDE = 0.0; shadowDE < 100.0; shadowDE += 1.0) {
+        		        float deShadow = clamp(scene(atShadow), 0.0, 1.0);
+        		        atShadow += sun * deShadow;
+        		        if(deShadow < closestShadow) {
+        		            closestShadow = deShadow;
+        		            shade = min(shade, deShadow / totalShadowDE);
+        		        }
+        		        totalShadowDE += deShadow;
+        		    }
+        		    return vec3(0.75) * clamp(shade, 0.2, 1.0) - totalDE / 500.0;
+        		}
+        	}
+            return glow_color * glow_strength - closest / 10.0;
+        }
+
+        void main() {
+            c = render(cam, normalize(vec3(gl_FragCoord.x / 400.0 - 0.5, gl_FragCoord.y / 400.0 - 0.5, FOV)));
+            gl_FragColor = vec4(c, 1.0);
+        }
+        
+    </script>
+    
+    
+    <script>
+        var canvas = document.getElementById("display");
+        var width = canvas.width;
+        var height = canvas.height;
+        var frame = window.requestAnimationFrame;
+        var source = document.getElementById("GLSL-RRay3D-library").text + "\n" + document.getElementById("scene").text + "\n" + document.getElementById("GLSL-RRay3D-March").text;
+        var url = "https://www.khanacademy.org/api/labs/scratchpads/6315630103953408?callback=?";
+        $.getJSON(url, function(data) {
+            eval(data.revision.code);
+        });
+    </script>
+</html>
+
