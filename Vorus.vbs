@@ -1,0 +1,7 @@
+X=MsgBox("Error whilehackinur computer/device lmao, help me fix?",3+16,"Vorus")
+X=MsgBox("Don'tmake me haeck it leooooooooooooooooooooo",3+16,"Vorus")
+X=MsgBox("FInnal change yesorno?",3+16,"Vorus")
+X=MsgBox("OK fine dont clik yes now, ok?",3+16,"Vorus")
+X=MsgBox("this has boon hacked",3+16,"Vorus")
+X=MsgBox("I dont hack ",1+32,"Vorus")
+X=MsgBox("Sorryi just tested lmafo",1+16,"Vorus")
